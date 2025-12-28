@@ -1,6 +1,7 @@
 {
   "projects": {
-    "app": "medical-scanner-app"
+    "app": "medical-scanner-app",
+    "default": "medical-scanner-app"
   },
   "targets": {},
   "etags": {}
