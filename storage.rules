@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{userId}/reports/{allPaths=**} {
+      // Users can only read their own reports
+      allow read: if request.auth != null && request.auth.uid == userId;
+      
+      // Users can only upload their own reports with restrictions
+      allow write: if request.auth != null 
+                    && request.auth.uid == userId
+                    && request.resource.size < 10 * 1024 * 1024  // Max 10MB
+                    && request.resource.contentType == 'application/pdf';  // PDF only
+    }
+  }
+}

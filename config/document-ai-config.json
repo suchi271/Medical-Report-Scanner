@@ -1,0 +1,18 @@
+{
+  "processor_id": "your-processor-id-here",
+  "location": "us",
+  "project_id": "your-project-id",
+  "processor_type": "FORM_PARSER_PROCESSOR",
+  "extraction_config": {
+    "fields_to_extract": [
+      "test_name",
+      "value",
+      "unit",
+      "reference_range",
+      "report_date",
+      "patient_name"
+    ],
+    "confidence_threshold": 0.7
+  }
+}
+
