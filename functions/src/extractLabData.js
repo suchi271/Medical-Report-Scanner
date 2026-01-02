@@ -1,22 +1,21 @@
-const { BigQuery } = require('@google-cloud/bigquery');
+const { BigQuery } = require("@google-cloud/bigquery");
 const bigquery = new BigQuery({ projectId: "medical-scanner-app" });
-const DATASET_ID = 'medical_reports';
-const TABLE_ID = 'lab_results';
 
-const { DocumentProcessorServiceClient } = require('@google-cloud/documentai');
-const admin = require('firebase-admin');
+const DATASET_ID = "medical_reports";
+const TABLE_ID = "lab_results";
 
+const { DocumentProcessorServiceClient } = require("@google-cloud/documentai");
+const admin = require("firebase-admin");
 
-  
 // ---------- Document AI Client ----------
 const documentaiClient = new DocumentProcessorServiceClient({
-  apiEndpoint: 'us-documentai.googleapis.com',
+  apiEndpoint: "us-documentai.googleapis.com",
 });
 
 // ---------- Config ----------
 const PROCESSOR_ID = process.env.DOCUMENT_AI_PROCESSOR_ID;
-const PROJECT_ID = 'medical-scanner-app';
-const LOCATION = 'us';
+const PROJECT_ID = "medical-scanner-app";
+const LOCATION = "us";
 
 /* =========================
    MAIN CLOUD FUNCTION
@@ -27,19 +26,19 @@ module.exports = async (req, res) => {
     const authenticatedUserId = req.user.uid;
 
     if (userId !== authenticatedUserId) {
-      return res.status(403).json({ error: 'Forbidden' });
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     if (!pdfUri) {
-      return res.status(400).json({ error: 'pdfUri is required' });
+      return res.status(400).json({ error: "pdfUri is required" });
     }
 
     // ---------- Resolve Firebase Storage path ----------
     let filePath = pdfUri;
 
-    if (pdfUri.startsWith('gs://')) {
-      filePath = pdfUri.replace(/^gs:\/\//, '');
-    } else if (pdfUri.startsWith('https://')) {
+    if (pdfUri.startsWith("gs://")) {
+      filePath = pdfUri.replace(/^gs:\/\//, "");
+    } else if (pdfUri.startsWith("https://")) {
       const url = new URL(pdfUri);
       const match = url.pathname.match(/\/o\/(.+)/);
       if (!match) {
@@ -60,133 +59,148 @@ module.exports = async (req, res) => {
       name,
       rawDocument: {
         content: fileBuffer,
-        mimeType: 'application/pdf',
+        mimeType: "application/pdf",
       },
     };
 
     const [result] = await documentaiClient.processDocument(request);
     const document = result.document;
-    const fullText = document?.text || '';
+    const fullText = document?.text || "";
 
-    // ---------- DEBUG OCR OUTPUT ----------
-    console.log('===== DOCUMENT AI OCR TEXT START =====');
+    console.log("===== DOCUMENT AI OCR TEXT START =====");
     console.log(fullText);
-    console.log('===== DOCUMENT AI OCR TEXT END =====');
+    console.log("===== DOCUMENT AI OCR TEXT END =====");
 
     // ---------- EXTRACT CBC TESTS ----------
     const tests = extractCBCFromText(fullText);
+    console.log("Parsed tests:", JSON.stringify(tests, null, 2));
+
     // ---------- INSERT INTO BIGQUERY ----------
-if (tests.length > 0) {
-  const rows = tests.map(test => ({
-    report_id: file.name,                // or Firestore doc ID
-    user_id: userId,
-    report_date: new Date().toISOString().split('T')[0],
-    test_name: test.test_name,
-    value: test.value,
-    unit: test.unit,
-    reference_min: test.reference_range.min,
-    reference_max: test.reference_range.max,
-    status: test.status,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }));
+    let insertedCount = 0;
+    const reportId = filePath.split("/").pop().replace(".pdf", "");
+    if (tests.length > 0) {
+      const rowsToInsert = tests.map((test) => ({
 
-  await bigquery
-    .dataset(DATASET_ID)
-    .table(TABLE_ID)
-    .insert(rows);
-}
+        report_id: reportId,
 
+        user_id: userId,
+        report_date: new Date().toISOString().split("T")[0],
+        test_name: test.test_name,
+        value: test.value,
+        unit: test.unit,
+        reference_min: test.reference_range.min,
+        reference_max: test.reference_range.max,
+        status: test.status,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
 
-    // ---------- SAFE RESPONSE (DO NOT BREAK FRONTEND) ----------
+      await bigquery
+        .dataset(DATASET_ID)
+        .table(TABLE_ID)
+        .insert(rowsToInsert);
+
+      insertedCount = rowsToInsert.length;
+      console.log(`✅ Inserted ${insertedCount} rows into BigQuery`);
+    }
+
     return res.json({
-      status: 'completed',
+      status: "completed",
       reportDate: new Date().toISOString(),
       tests,
-
-      // Optional debug (safe to ignore in UI)
       debug: {
         extractedCount: tests.length,
+        insertedCount,
       },
     });
-
   } catch (error) {
-    console.error('Error processing report:', error);
+    console.error("Error processing report:", error);
     return res.status(500).json({
-      status: 'error',
+      status: "error",
       message: error.message,
     });
   }
 };
 
 /* =========================
-   CBC EXTRACTION LOGIC
+   ROBUST CBC EXTRACTION
 ========================= */
 function extractCBCFromText(text) {
   if (!text) return [];
 
   const lines = text
-    .split('\n')
+    .split("\n")
     .map(l => l.trim())
     .filter(Boolean);
 
-  const tests = [];
-
-  const patterns = [
+  const TESTS = [
     {
-      name: 'Hemoglobin',
-      regex: /Hemoglobin.*?(\d+(\.\d+)?)/i,
-      unit: 'g/dL',
+      name: "Hemoglobin",
+      keywords: ["hemoglobin", "hb"],
+      unit: "g/dL",
       ref: { min: 13.0, max: 17.0 },
     },
     {
-      name: 'RBC Count',
-      regex: /Total RBC count.*?(\d+(\.\d+)?)/i,
-      unit: 'mill/cumm',
+      name: "RBC Count",
+      keywords: ["total rbc", "rbc count"],
+      unit: "mill/cumm",
       ref: { min: 4.5, max: 5.5 },
     },
     {
-      name: 'Packed Cell Volume',
-      regex: /Packed Cell Volume.*?(\d+(\.\d+)?)/i,
-      unit: '%',
+      name: "Packed Cell Volume",
+      keywords: ["packed cell volume", "pcv"],
+      unit: "%",
       ref: { min: 40, max: 50 },
     },
     {
-      name: 'MCV',
-      regex: /Mean Corpuscular Volume.*?(\d+(\.\d+)?)/i,
-      unit: 'fL',
+      name: "MCV",
+      keywords: ["mean corpuscular volume", "mcv"],
+      unit: "fL",
       ref: { min: 83, max: 101 },
     },
     {
-      name: 'Platelet Count',
-      regex: /Platelet Count.*?(\d+)/i,
-      unit: 'cells/cumm',
+      name: "Platelet Count",
+      keywords: ["platelet count"],
+      unit: "cells/cumm",
       ref: { min: 150000, max: 410000 },
     },
   ];
 
-  for (const pattern of patterns) {
-    for (const line of lines) {
-      const match = line.match(pattern.regex);
-      if (match) {
-        const value = parseFloat(match[1]);
+  const results = [];
+  const seenTests = new Set(); // ✅ DEDUPE KEY
 
-        let status = 'normal';
-        if (value < pattern.ref.min) status = 'low';
-        if (value > pattern.ref.max) status = 'high';
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].toLowerCase();
 
-        tests.push({
-          test_name: pattern.name,
-          value,
-          unit: pattern.unit,
-          reference_range: pattern.ref,
-          status,
-        });
+    for (const test of TESTS) {
+      if (seenTests.has(test.name)) continue; // ✅ skip duplicates
 
-        break;
+      if (test.keywords.some(k => line.includes(k))) {
+        for (let j = i + 1; j <= i + 3 && j < lines.length; j++) {
+          const match = lines[j].match(/(\d+(\.\d+)?)/);
+          if (match) {
+            const value = parseFloat(match[1]);
+
+            let status = "normal";
+            if (value < test.ref.min) status = "low";
+            if (value > test.ref.max) status = "high";
+
+            results.push({
+              test_name: test.name,
+              value,
+              unit: test.unit,
+              reference_range: test.ref,
+              status,
+            });
+
+            seenTests.add(test.name); // ✅ mark as captured
+            break;
+          }
+        }
       }
     }
   }
 
-  return tests;
+  return results;
 }
+

@@ -1,94 +1,91 @@
-const functions = require('firebase-functions');
-const admin = require('firebase-admin');
-const express = require('express');
-const cors = require('cors');
+const { BigQuery } = require("@google-cloud/bigquery");
+const bigquery = new BigQuery({ projectId: "medical-scanner-app" });
 
-if (process.env.NODE_ENV !== 'production') {
-  require('dotenv').config();
-}
-if (process.env.FUNCTIONS_EMULATOR === "true") {
-  process.env.FIRESTORE_EMULATOR_HOST = "localhost:8081";
-}
+const DATASET_ID = "medical_reports";
+const TABLE_ID = "lab_results";
+
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+const express = require("express");
+const cors = require("cors");
 
 admin.initializeApp();
 
-
-
 const app = express();
-
-/**
- * 🔑 IMPORTANT:
- * Do NOT use app.use(cors()) in Firebase v1.
- * CORS must wrap the function itself.
- */
-
-// Body parser
 app.use(express.json());
 
-// ---------- Auth Middleware ----------
+// ---------- Auth ----------
 const verifyAuth = async (req, res, next) => {
   try {
-    // 🔑 Allow preflight to pass
-    if (req.method === 'OPTIONS') {
-      return next();
-    }
+    if (req.method === "OPTIONS") return next();
 
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    if (!authHeader?.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const token = authHeader.split('Bearer ')[1];
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    req.user = decodedToken;
+    const token = authHeader.split("Bearer ")[1];
+    req.user = await admin.auth().verifyIdToken(token);
     next();
-  } catch (error) {
-    console.error('Auth error:', error);
-    return res.status(401).json({ error: 'Unauthorized' });
+  } catch (e) {
+    console.error("Auth error:", e);
+    res.status(401).json({ error: "Unauthorized" });
   }
-};
-
-// ---------- Rate Limit ----------
-const rateLimitMap = new Map();
-const rateLimit = (req, res, next) => {
-  if (req.method === 'OPTIONS') return next();
-
-  const userId = req.user.uid;
-  const now = Date.now();
-  const windowMs = 60 * 1000;
-  const maxRequests = 10;
-
-  const entry = rateLimitMap.get(userId) || { count: 0, resetTime: now + windowMs };
-
-  if (now > entry.resetTime) {
-    entry.count = 0;
-    entry.resetTime = now + windowMs;
-  }
-
-  if (entry.count >= maxRequests) {
-    return res.status(429).json({ error: 'Too many requests' });
-  }
-
-  entry.count++;
-  rateLimitMap.set(userId, entry);
-  next();
 };
 
 app.use(verifyAuth);
-app.use(rateLimit);
 
 // ---------- Routes ----------
-app.post('/processReport', require('./extractLabData'));
-app.post('/analyzeReport', require('./analyzeReport'));
-app.post('/getTrends', require('./getTrends'));
-app.post('/compareReports', require('./compareReports'));
+app.post("/processReport", require("./extractLabData"));
+app.post("/analyzeReport", require("./analyzeReport"));
+app.post("/getTrends", require("./getTrends"));
+app.post("/compareReports", require("./compareReports"));
 
-// ---------- 🔑 CORS WRAPPED FUNCTION ----------
+// ---------- READ REPORT DATA ----------
+app.get("/getReportData", async (req, res) => {
+  try {
+    const userId = req.user.uid;
+    const reportId = req.query.reportId;
+
+    if (!reportId) {
+      return res.status(400).json({ error: "reportId required" });
+    }
+
+    const query = `
+      SELECT
+        report_id,
+        report_date,
+        test_name,
+        value,
+        unit,
+        reference_min,
+        reference_max,
+        status
+      FROM \`${DATASET_ID}.${TABLE_ID}\`
+      WHERE user_id = @userId
+      AND report_id = @reportId
+      ORDER BY test_name
+    `;
+
+    
+
+    const [rows] = await bigquery.query({
+      query,
+      params: { userId, reportId },
+    });
+
+
+    res.json(rows);
+  } catch (err) {
+    console.error("BigQuery read error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------- Export ----------
 exports.api = functions.https.onRequest((req, res) => {
   cors({
-    origin: 'http://localhost:3000',
+    origin: "http://localhost:3000",
     credentials: true,
-  })(req, res, () => {
-    app(req, res);
-  });
+  })(req, res, () => app(req, res));
 });

@@ -12,81 +12,112 @@ import "./Dashboard.css";
 const ReportViewer = ({ userId, reportId }) => {
   const [report, setReport] = useState(null);
   const [analysis, setAnalysis] = useState(null);
+  const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
-
-  // 🔥 Selected test for trends
   const [selectedTest, setSelectedTest] = useState(null);
 
   useEffect(() => {
     loadReport();
+    fetchBigQueryTests();
+    // eslint-disable-next-line
   }, [userId, reportId]);
 
+  // -------------------------
+  // Load report metadata
+  // -------------------------
   const loadReport = async () => {
     try {
-      const reportDoc = await getDoc(
+      const snap = await getDoc(
         doc(db, "users", userId, "reports", reportId)
       );
-
-      if (reportDoc.exists()) {
-        const reportData = { id: reportDoc.id, ...reportDoc.data() };
-        setReport(reportData);
-        if (reportData.analysis) {
-          setAnalysis(reportData.analysis);
-        }
+      if (snap.exists()) {
+        const data = { id: snap.id, ...snap.data() };
+        setReport(data);
+        if (data.analysis) setAnalysis(data.analysis);
       }
-    } catch (error) {
-      console.error("Error loading report:", error);
+    } catch (err) {
+      console.error("Error loading report:", err);
+    }
+  };
+
+  // -------------------------
+  // Fetch BigQuery test data
+  // -------------------------
+  const fetchBigQueryTests = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const token = await user.getIdToken();
+
+      const res = await fetch(
+  `http://localhost:5001/medical-scanner-app/us-central1/api/getReportData?reportId=${reportId}`,
+  {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  }
+);
+
+
+      const data = await res.json();
+
+      if (!Array.isArray(data)) {
+        console.error("Expected array, got:", data);
+        setTests([]);
+        return;
+      }
+
+      setTests(data);
+    } catch (err) {
+      console.error("Error fetching BigQuery data:", err);
+      setTests([]);
     } finally {
       setLoading(false);
     }
   };
 
+  // -------------------------
+  // AI Explanation
+  // -------------------------
   const handleAnalyze = async () => {
     setAnalyzing(true);
     try {
       const result = await analyzeReport(reportId);
       setAnalysis(result);
-
       await updateDoc(
         doc(db, "users", userId, "reports", reportId),
         { analysis: result }
       );
-    } catch (error) {
-      console.error("Error analyzing report:", error);
+    } catch (err) {
+      console.error("Analyze error:", err);
     } finally {
       setAnalyzing(false);
     }
   };
 
-  if (loading) {
-    return <div className="loading">Loading report...</div>;
-  }
-
-  if (!report) {
-    return <div className="error-message">Report not found</div>;
-  }
-
-  const extractedData = report.extractedData || {};
-  const tests = extractedData.tests || [];
+  // -------------------------
+  // UI
+  // -------------------------
+  if (loading) return <div className="loading">Loading report...</div>;
+  if (!report) return <div className="error-message">Report not found</div>;
 
   return (
     <div className="report-viewer">
-      {/* HEADER */}
       <div className="report-header-section">
         <h2>{report.fileName || "Lab Report"}</h2>
 
         {report.reportDate && (
           <p className="report-date">
-            Report Date:{" "}
-            {new Date(report.reportDate).toLocaleDateString()}
+            Report Date: {new Date(report.reportDate).toLocaleDateString()}
           </p>
         )}
 
         {!analysis && (
           <button
-            onClick={handleAnalyze}
             className="btn-primary"
+            onClick={handleAnalyze}
             disabled={analyzing}
           >
             {analyzing ? "Analyzing..." : "Get AI Explanation"}
@@ -94,7 +125,6 @@ const ReportViewer = ({ userId, reportId }) => {
         )}
       </div>
 
-      {/* DISCLAIMER */}
       {analysis && (
         <div className="safety-disclaimer">
           <strong>⚠️ IMPORTANT DISCLAIMER</strong>
@@ -107,32 +137,38 @@ const ReportViewer = ({ userId, reportId }) => {
         </div>
       )}
 
-      {/* TEST LIST */}
       <div className="tests-section">
         <h3>Test Results</h3>
-        <div className="tests-grid">
-          {tests.map((test, index) => (
-            <TestCard
-              key={index}
-              test={test}
-              onClick={() => setSelectedTest(test.test_name)}
-              isActive={selectedTest === test.test_name}
-            />
-          ))}
-        </div>
+
+        {tests.length === 0 ? (
+          <p>No test data found for this report.</p>
+        ) : (
+          <div className="tests-grid">
+            {tests.map((t, i) => (
+              <TestCard
+                key={i}
+                test={{
+                  test_name: t.test_name,
+                  value: t.value,
+                  unit: t.unit,
+                  status: t.status,
+                  reference_range: {
+                    min: t.reference_min,
+                    max: t.reference_max,
+                  },
+                }}
+                onClick={() => setSelectedTest(t.test_name)}
+                isActive={selectedTest === t.test_name}
+              />
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* TREND CHART */}
       {selectedTest && (
-        <div className="trend-section">
-          <TrendChart
-            userId={userId}
-            testName={selectedTest}
-          />
-        </div>
+        <TrendChart userId={userId} testName={selectedTest} />
       )}
 
-      {/* AI EXPLANATION */}
       {analysis && (
         <ExplanationView
           analysis={analysis}
