@@ -1,16 +1,21 @@
-import { useState, useEffect } from 'react';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../../config/firebase';
-import { analyzeReport } from '../../utils/api';
-import TestCard from './TestCard';
-import ExplanationView from '../Analysis/ExplanationView';
-import './Dashboard.css';
+import { useState, useEffect } from "react";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { db, auth } from "../../config/firebase";
+import { analyzeReport } from "../../utils/api";
+
+import TestCard from "./TestCard";
+import TrendChart from "./TrendChart";
+import ExplanationView from "../Analysis/ExplanationView";
+
+import "./Dashboard.css";
 
 const ReportViewer = ({ userId, reportId }) => {
   const [report, setReport] = useState(null);
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+
+  // 🔥 Selected test for trends
   const [selectedTest, setSelectedTest] = useState(null);
 
   useEffect(() => {
@@ -20,21 +25,19 @@ const ReportViewer = ({ userId, reportId }) => {
   const loadReport = async () => {
     try {
       const reportDoc = await getDoc(
-        doc(db, 'users', userId, 'reports', reportId)
+        doc(db, "users", userId, "reports", reportId)
       );
-      
+
       if (reportDoc.exists()) {
         const reportData = { id: reportDoc.id, ...reportDoc.data() };
         setReport(reportData);
-        
-        // Load analysis if available
         if (reportData.analysis) {
           setAnalysis(reportData.analysis);
         }
       }
-      setLoading(false);
     } catch (error) {
-      console.error('Error loading report:', error);
+      console.error("Error loading report:", error);
+    } finally {
       setLoading(false);
     }
   };
@@ -44,14 +47,13 @@ const ReportViewer = ({ userId, reportId }) => {
     try {
       const result = await analyzeReport(reportId);
       setAnalysis(result);
-      
-      // Save analysis to Firestore
+
       await updateDoc(
-        doc(db, 'users', userId, 'reports', reportId),
+        doc(db, "users", userId, "reports", reportId),
         { analysis: result }
       );
     } catch (error) {
-      console.error('Error analyzing report:', error);
+      console.error("Error analyzing report:", error);
     } finally {
       setAnalyzing(false);
     }
@@ -70,41 +72,42 @@ const ReportViewer = ({ userId, reportId }) => {
 
   return (
     <div className="report-viewer">
+      {/* HEADER */}
       <div className="report-header-section">
-        <h2>{report.fileName || 'Lab Report'}</h2>
+        <h2>{report.fileName || "Lab Report"}</h2>
+
         {report.reportDate && (
           <p className="report-date">
-            Report Date: {new Date(report.reportDate).toLocaleDateString()}
+            Report Date:{" "}
+            {new Date(report.reportDate).toLocaleDateString()}
           </p>
         )}
+
         {!analysis && (
           <button
             onClick={handleAnalyze}
             className="btn-primary"
             disabled={analyzing}
           >
-            {analyzing ? 'Analyzing...' : 'Get AI Explanation'}
+            {analyzing ? "Analyzing..." : "Get AI Explanation"}
           </button>
         )}
       </div>
 
+      {/* DISCLAIMER */}
       {analysis && (
         <div className="safety-disclaimer">
           <strong>⚠️ IMPORTANT DISCLAIMER</strong>
-          <p>
-            This tool explains what your lab values mean but does NOT:
-          </p>
+          <p>This tool explains lab values but does NOT:</p>
           <ul>
-            <li>✗ Diagnose medical conditions</li>
+            <li>✗ Diagnose conditions</li>
             <li>✗ Recommend treatments</li>
-            <li>✗ Replace your doctor's judgment</li>
+            <li>✗ Replace doctors</li>
           </ul>
-          <p>
-            ✓ Always discuss your results with your healthcare provider
-          </p>
         </div>
       )}
 
+      {/* TEST LIST */}
       <div className="tests-section">
         <h3>Test Results</h3>
         <div className="tests-grid">
@@ -112,12 +115,24 @@ const ReportViewer = ({ userId, reportId }) => {
             <TestCard
               key={index}
               test={test}
-              onClick={() => setSelectedTest(test)}
+              onClick={() => setSelectedTest(test.test_name)}
+              isActive={selectedTest === test.test_name}
             />
           ))}
         </div>
       </div>
 
+      {/* TREND CHART */}
+      {selectedTest && (
+        <div className="trend-section">
+          <TrendChart
+            userId={userId}
+            testName={selectedTest}
+          />
+        </div>
+      )}
+
+      {/* AI EXPLANATION */}
       {analysis && (
         <ExplanationView
           analysis={analysis}
@@ -130,4 +145,3 @@ const ReportViewer = ({ userId, reportId }) => {
 };
 
 export default ReportViewer;
-

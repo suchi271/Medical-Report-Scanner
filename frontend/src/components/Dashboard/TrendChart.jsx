@@ -48,15 +48,17 @@ const TrendChart = ({ userId, testName }) => {
 
   // Prepare chart data
   const chartData = data.map((item) => ({
-    date: new Date(item.report_date).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric'
-    }),
-    value: item.value,
-    referenceMin: item.reference_min,
-    referenceMax: item.reference_max,
-    baseline: baseline?.personal_baseline
-  }));
+  date: new Date(item.report_date).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric'
+  }),
+  value: item.value,
+  unit: item.unit,
+  referenceMin: item.reference_min,
+  referenceMax: item.reference_max,
+  baseline: baseline?.personal_baseline
+}));
+
 
   const firstDataPoint = chartData[0];
   const lastDataPoint = chartData[chartData.length - 1];

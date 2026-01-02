@@ -1,87 +1,160 @@
-import { useState } from 'react';
-import { compareReports } from '../../utils/api';
-import './Analysis.css';
+import { useEffect, useState } from "react";
+import { collection, getDocs, doc, getDoc } from "firebase/firestore";
+import { db, auth } from "../../config/firebase";
 
-const ComparisonView = ({ userId, reportIds }) => {
+export default function ComparisonView() {
+  const [reports, setReports] = useState([]);
+  const [selected, setSelected] = useState([]);
   const [comparison, setComparison] = useState(null);
+  const [selectedReports, setSelectedReports] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  const handleCompare = async () => {
-    if (reportIds.length < 2) {
-      alert('Please select at least 2 reports to compare');
-      return;
-    }
+  useEffect(() => {
+    loadReports();
+  }, []);
 
-    setLoading(true);
-    try {
-      const result = await compareReports(reportIds);
-      setComparison(result);
-    } catch (error) {
-      console.error('Error comparing reports:', error);
-    } finally {
-      setLoading(false);
-    }
+  const loadReports = async () => {
+    const snap = await getDocs(
+      collection(db, "users", auth.currentUser.uid, "reports")
+    );
+
+    const data = snap.docs.map(d => ({
+      id: d.id,
+      ...d.data()
+    }));
+
+    setReports(data);
   };
 
-  if (!reportIds || reportIds.length < 2) {
-    return (
-      <div className="comparison-view">
-        <p>Select at least 2 reports to compare them side by side.</p>
-      </div>
+  const toggleSelect = (id) => {
+    setSelected(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
-  }
+  };
+
+  const compareReports = async () => {
+    setLoading(true);
+    const fetched = [];
+
+    for (const id of selected) {
+      const ref = doc(db, "users", auth.currentUser.uid, "reports", id);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        fetched.push({ id, ...snap.data() });
+      }
+    }
+
+    setSelectedReports(fetched);
+    setComparison(buildComparison(fetched));
+    setLoading(false);
+  };
+
+  const buildComparison = (reports) => {
+    const map = {};
+
+    reports.forEach(r => {
+      const tests = r.tests || []; // 🔥 FIXED PATH
+      tests.forEach(t => {
+        if (!map[t.test_name]) map[t.test_name] = {};
+        map[t.test_name][r.id] = {
+          value: t.value,
+          unit: t.unit,
+          status: t.status
+        };
+      });
+    });
+
+    return map;
+  };
 
   return (
-    <div className="comparison-view">
-      <div className="comparison-header">
-        <h2>Compare Reports</h2>
-        <button
-          onClick={handleCompare}
-          className="btn-primary"
-          disabled={loading}
-        >
-          {loading ? 'Comparing...' : 'Compare Selected Reports'}
-        </button>
+    <div style={{ padding: "24px" }}>
+      <h2>Compare Lab Reports</h2>
+      <p>Select at least 2 reports</p>
+
+      {/* REPORT PICKER */}
+      <div style={{ display: "grid", gap: "10px", maxWidth: "600px" }}>
+        {reports.map(r => (
+          <label
+            key={r.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              padding: "12px",
+              border: "1px solid #ddd",
+              borderRadius: "8px",
+              cursor: "pointer",
+              background: selected.includes(r.id) ? "#eef2ff" : "#fff"
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={selected.includes(r.id)}
+              onChange={() => toggleSelect(r.id)}
+              style={{ marginRight: "12px" }}
+            />
+            <div>
+              <strong>{r.fileName || "Lab Report"}</strong>
+              <div style={{ fontSize: "12px", color: "#666" }}>
+                Uploaded{" "}
+                {r.uploadedAt?.seconds
+                  ? new Date(r.uploadedAt.seconds * 1000).toLocaleDateString()
+                  : "—"}
+              </div>
+            </div>
+          </label>
+        ))}
       </div>
 
+      <button
+        onClick={compareReports}
+        disabled={selected.length < 2 || loading}
+        style={{
+          marginTop: "16px",
+          padding: "10px 16px",
+          borderRadius: "6px",
+          border: "none",
+          background: "#6366f1",
+          color: "white",
+          cursor: "pointer"
+        }}
+      >
+        {loading ? "Comparing..." : "Compare Selected Reports"}
+      </button>
+
+      {/* COMPARISON TABLE */}
       {comparison && (
-        <div className="comparison-table-container">
-          <table className="comparison-table">
+        <div style={{ marginTop: "32px", overflowX: "auto" }}>
+          <h3>Comparison</h3>
+
+          <table
+            style={{
+              borderCollapse: "collapse",
+              width: "100%",
+              marginTop: "12px"
+            }}
+          >
             <thead>
               <tr>
-                <th>Test Name</th>
-                {comparison.reports.map((report, index) => (
-                  <th key={index}>
-                    {new Date(report.report_date).toLocaleDateString()}
+                <th style={th}>Test</th>
+                {selectedReports.map(r => (
+                  <th key={r.id} style={th}>
+                    {r.fileName || "Report"}
                   </th>
                 ))}
-                <th>Change</th>
               </tr>
             </thead>
             <tbody>
-              {comparison.comparisons.map((comp, index) => (
-                <tr key={index}>
-                  <td>
-                    <strong>{comp.test_name}</strong>
-                  </td>
-                  {comp.values.map((value, idx) => (
-                    <td key={idx}>
-                      {value.value} {value.unit}
-                      <div className="status-badge-small">{value.status}</div>
+              {Object.entries(comparison).map(([test, values]) => (
+                <tr key={test}>
+                  <td style={td}><strong>{test}</strong></td>
+                  {selectedReports.map(r => (
+                    <td key={r.id} style={td}>
+                      {values[r.id]
+                        ? `${values[r.id].value} ${values[r.id].unit || ""}`
+                        : "—"}
                     </td>
                   ))}
-                  <td>
-                    {comp.change !== null && (
-                      <span
-                        className={`change-indicator ${
-                          comp.change > 0 ? 'increase' : comp.change < 0 ? 'decrease' : 'stable'
-                        }`}
-                      >
-                        {comp.change > 0 ? '↑' : comp.change < 0 ? '↓' : '→'}{' '}
-                        {Math.abs(comp.change).toFixed(2)} {comp.unit}
-                      </span>
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -90,7 +163,16 @@ const ComparisonView = ({ userId, reportIds }) => {
       )}
     </div>
   );
+}
+
+const th = {
+  borderBottom: "2px solid #ccc",
+  padding: "10px",
+  textAlign: "left",
+  background: "#f9fafb"
 };
 
-export default ComparisonView;
-
+const td = {
+  borderBottom: "1px solid #eee",
+  padding: "10px"
+};

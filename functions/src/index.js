@@ -6,8 +6,13 @@ const cors = require('cors');
 if (process.env.NODE_ENV !== 'production') {
   require('dotenv').config();
 }
+if (process.env.FUNCTIONS_EMULATOR === "true") {
+  process.env.FIRESTORE_EMULATOR_HOST = "localhost:8081";
+}
 
 admin.initializeApp();
+
+
 
 const app = express();
 

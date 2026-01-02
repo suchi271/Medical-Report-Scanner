@@ -1,11 +1,13 @@
+const { BigQuery } = require('@google-cloud/bigquery');
+const bigquery = new BigQuery({ projectId: "medical-scanner-app" });
+const DATASET_ID = 'medical_reports';
+const TABLE_ID = 'lab_results';
+
 const { DocumentProcessorServiceClient } = require('@google-cloud/documentai');
 const admin = require('firebase-admin');
 
-// ---------- Safe Firebase Admin Init ----------
-if (!admin.apps.length) {
-  admin.initializeApp();
-}
 
+  
 // ---------- Document AI Client ----------
 const documentaiClient = new DocumentProcessorServiceClient({
   apiEndpoint: 'us-documentai.googleapis.com',
@@ -73,6 +75,28 @@ module.exports = async (req, res) => {
 
     // ---------- EXTRACT CBC TESTS ----------
     const tests = extractCBCFromText(fullText);
+    // ---------- INSERT INTO BIGQUERY ----------
+if (tests.length > 0) {
+  const rows = tests.map(test => ({
+    report_id: file.name,                // or Firestore doc ID
+    user_id: userId,
+    report_date: new Date().toISOString().split('T')[0],
+    test_name: test.test_name,
+    value: test.value,
+    unit: test.unit,
+    reference_min: test.reference_range.min,
+    reference_max: test.reference_range.max,
+    status: test.status,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }));
+
+  await bigquery
+    .dataset(DATASET_ID)
+    .table(TABLE_ID)
+    .insert(rows);
+}
+
 
     // ---------- SAFE RESPONSE (DO NOT BREAK FRONTEND) ----------
     return res.json({
