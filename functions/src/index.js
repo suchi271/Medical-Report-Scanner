@@ -9,11 +9,20 @@ const admin = require("firebase-admin");
 const express = require("express");
 const cors = require("cors");
 
+
+
 admin.initializeApp();
 
 const app = express();
 app.use(express.json());
-
+app.use(
+  cors({
+    origin: "http://localhost:3000",
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+app.options("*", cors());
 // ---------- Auth ----------
 const verifyAuth = async (req, res, next) => {
   try {
