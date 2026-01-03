@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import './Analysis.css';
 
 const ExplanationView = ({ analysis, selectedTest, onClose }) => {
@@ -47,10 +49,10 @@ const ExplanationView = ({ analysis, selectedTest, onClose }) => {
                 to discuss your results.
               </p>
             </div>
-            <div className="explanation-body">
-              {explanation.split('\n').map((paragraph, index) => (
-                <p key={index}>{paragraph}</p>
-              ))}
+            <div className="explanation-body markdown-content">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {explanation}
+              </ReactMarkdown>
             </div>
           </div>
         )}
