@@ -51,8 +51,9 @@ const ReportViewer = ({ userId, reportId }) => {
 
       const token = await user.getIdToken();
 
+      const API_BASE_URL = import.meta.env.VITE_CLOUD_FUNCTIONS_URL;
       const res = await fetch(
-  `http://localhost:5001/medical-scanner-app/us-central1/api/getReportData?reportId=${reportId}`,
+  `${API_BASE_URL}/getReportData?reportId=${reportId}`,
   {
     headers: {
       Authorization: `Bearer ${token}`,
