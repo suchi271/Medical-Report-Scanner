@@ -1,7 +1,9 @@
-const { BigQuery } = require("@google-cloud/bigquery");
-const bigquery = new BigQuery({ projectId: "medical-scanner-app" });
+require('dotenv').config({ path: __dirname + '/.env' });
 
-const DATASET_ID = "medical_reports";
+const { BigQuery } = require("@google-cloud/bigquery");
+const bigquery = new BigQuery({ projectId: process.env.GCP_PROJECT_ID || "medical-scanner-app" });
+
+const DATASET_ID = process.env.BIGQUERY_DATASET || "medical_reports";
 const TABLE_ID = "lab_results";
 
 const functions = require("firebase-functions");
@@ -13,11 +15,18 @@ const cors = require("cors");
 
 admin.initializeApp();
 
+// NOTE: We use production Storage even when testing locally
+// because the Storage emulator has issues with the Admin SDK download method
+
 const app = express();
 app.use(express.json());
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: [
+      "http://localhost:3000",
+      "https://medical-scanner-app.web.app",
+      "https://medical-scanner-app.firebaseapp.com"
+    ],
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
@@ -94,7 +103,11 @@ app.get("/getReportData", async (req, res) => {
 // ---------- Export ----------
 exports.api = functions.https.onRequest((req, res) => {
   cors({
-    origin: "http://localhost:3000",
+    origin: [
+      "http://localhost:3000",
+      "https://medical-scanner-app.web.app",
+      "https://medical-scanner-app.firebaseapp.com"
+    ],
     credentials: true,
   })(req, res, () => app(req, res));
 });

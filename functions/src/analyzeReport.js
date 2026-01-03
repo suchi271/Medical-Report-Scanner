@@ -1,10 +1,10 @@
 const { BigQuery } = require('@google-cloud/bigquery');
-
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const admin = require('firebase-admin');
 const enforceSafety = require('./safetyGuardrails');
 
 const bigquery = new BigQuery();
-
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const DATASET_ID = process.env.BIGQUERY_DATASET || 'medical_reports';
 const MODEL_NAME = 'gemini-2.0-flash-exp';

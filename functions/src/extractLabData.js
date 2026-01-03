@@ -1,7 +1,9 @@
-const { BigQuery } = require("@google-cloud/bigquery");
-const bigquery = new BigQuery({ projectId: "medical-scanner-app" });
+require('dotenv').config({ path: __dirname + '/.env' });
 
-const DATASET_ID = "medical_reports";
+const { BigQuery } = require("@google-cloud/bigquery");
+const bigquery = new BigQuery({ projectId: process.env.GCP_PROJECT_ID || "medical-scanner-app" });
+
+const DATASET_ID = process.env.BIGQUERY_DATASET || "medical_reports";
 const TABLE_ID = "lab_results";
 
 const { DocumentProcessorServiceClient } = require("@google-cloud/documentai");
@@ -14,8 +16,8 @@ const documentaiClient = new DocumentProcessorServiceClient({
 
 // ---------- Config ----------
 const PROCESSOR_ID = process.env.DOCUMENT_AI_PROCESSOR_ID;
-const PROJECT_ID = "medical-scanner-app";
-const LOCATION = "us";
+const PROJECT_ID = process.env.GCP_PROJECT_ID || "medical-scanner-app";
+const LOCATION = process.env.DOCUMENT_AI_LOCATION || "us";
 
 /* =========================
    MAIN CLOUD FUNCTION
@@ -35,21 +37,28 @@ module.exports = async (req, res) => {
 
     // ---------- Resolve Firebase Storage path ----------
     let filePath = pdfUri;
+    
+    console.log('Received pdfUri:', pdfUri);
 
     if (pdfUri.startsWith("gs://")) {
-      filePath = pdfUri.replace(/^gs:\/\//, "");
-    } else if (pdfUri.startsWith("https://")) {
+      filePath = pdfUri.replace(/^gs:\/\/[^\/]+\//, "");
+    } else if (pdfUri.startsWith("https://") || pdfUri.startsWith("http://")) {
       const url = new URL(pdfUri);
       const match = url.pathname.match(/\/o\/(.+)/);
       if (!match) {
         throw new Error(`Invalid Firebase Storage URL: ${pdfUri}`);
       }
-      filePath = decodeURIComponent(match[1]);
+      filePath = decodeURIComponent(match[1].split('?')[0]);
     }
+    
+    console.log('Resolved filePath:', filePath);
 
-    // ---------- Download PDF ----------
-    const bucket = admin.storage().bucket();
+    // ---------- Download PDF from Storage ----------
+    const bucket = admin.storage().bucket('medical-scanner-app.firebasestorage.app');
     const file = bucket.file(filePath);
+    
+    console.log('Downloading from bucket:', bucket.name, 'file:', file.name);
+    
     const [fileBuffer] = await file.download();
 
     // ---------- Document AI ----------
@@ -102,6 +111,32 @@ module.exports = async (req, res) => {
 
       insertedCount = rowsToInsert.length;
       console.log(`✅ Inserted ${insertedCount} rows into BigQuery`);
+      
+      // ---------- SAVE TO FIRESTORE ----------
+      const reportDate = new Date().toISOString();
+      const firestoreData = {
+        reportId,
+        userId,
+        uploadedAt: reportDate,
+        reportDate: new Date().toISOString().split("T")[0],
+        pdfPath: pdfUri,
+        status: 'processed',
+        extractedData: {
+          tests,
+          report_date: new Date().toISOString().split("T")[0],
+          processed_at: reportDate
+        }
+      };
+      
+      await admin
+        .firestore()
+        .collection('users')
+        .doc(userId)
+        .collection('reports')
+        .doc(reportId)
+        .set(firestoreData);
+        
+      console.log(`✅ Saved report to Firestore: users/${userId}/reports/${reportId}`);
     }
 
     return res.json({
